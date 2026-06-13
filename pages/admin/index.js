@@ -5,7 +5,7 @@ import { useAuth } from "../_app";
 import { useRouter } from "next/router";
 import { formatLocal } from "../../lib/helpers";
 
-const STAGES = ["Group Stage","Round of 16","Quarter Final","Semi Final","Third Place","Final"];
+const STAGES = ["Group Stage","Round of 32","Round of 16","Quarter Final","Semi Final","Third Place","Final"];
 const empty = { team_a:"", team_b:"", team_a_code:"", team_b_code:"", kickoff:"", stage:"Group Stage" };
 
 export default function Admin() {
