@@ -24,7 +24,7 @@ export default function Matches() {
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [user]);
 
-  const stages = ["all", "Group Stage", "Round of 16", "Quarter Final", "Semi Final", "Third Place", "Final"];
+  const stages = ["all", "Group Stage", "Round of 32", "Round of 16", "Quarter Final", "Semi Final", "Third Place", "Final"];
   const shown = matches.filter(m => filter === "all" || m.stage === filter);
 
   return (
