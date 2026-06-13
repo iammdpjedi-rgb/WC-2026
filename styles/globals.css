@@ -1,0 +1,13 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { background: #0a0f14; color: #e9eef2; }
+
+.card { @apply rounded-2xl bg-white/5 border border-white/10 backdrop-blur; }
+.btn  { @apply rounded-xl px-4 py-2 font-semibold transition active:scale-95 disabled:opacity-40 disabled:active:scale-100; }
+.btn-primary { @apply btn bg-gold text-ink hover:brightness-110; }
+.btn-ghost   { @apply btn bg-white/10 text-white hover:bg-white/20; }
+.input { @apply w-full rounded-xl bg-white/5 border border-white/15 px-4 py-3 outline-none focus:border-gold; }
+.pill  { @apply text-xs font-semibold px-2.5 py-1 rounded-full; }
