@@ -121,7 +121,7 @@ create policy "insert prediction in window" on public.predictions
       where m.id = match_id
         and m.is_completed = false
         and now() >= (m.kickoff - interval '24 hours')
-        and now() <= (m.kickoff - interval '2 hours')
+        and now() <= (m.kickoff - interval '5 minutes')
     )
   );
 
