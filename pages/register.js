@@ -3,25 +3,20 @@ import Layout from "../components/Layout";
 import Link from "next/link";
 import { useRouter } from "next/router";
 import { supabase } from "../lib/supabaseClient";
-
 export default function Register() {
   const router = useRouter();
   const [form, setForm] = useState({ display_name: "", username: "", email: "", password: "" });
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
-
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
-
   async function register(e) {
     e.preventDefault();
     setBusy(true); setError(""); setMsg("");
-
     // Quick check that the username isn't taken (the DB also enforces this).
     const { data: taken } = await supabase
       .from("profiles").select("id").eq("username", form.username).maybeSingle();
     if (taken) { setBusy(false); return setError("That username is already taken."); }
-
     const { error } = await supabase.auth.signUp({
       email: form.email,
       password: form.password,
@@ -29,9 +24,8 @@ export default function Register() {
     });
     setBusy(false);
     if (error) return setError(error.message);
-    setMsg("Account created! If email confirmation is on, check your inbox, then log in.");
+    setMsg("You're all set — account created! Just head to Log in and sign in with your email and password. No need to check your email or confirm anything.");
   }
-
   return (
     <Layout>
       <div className="max-w-sm mx-auto">
