@@ -44,7 +44,7 @@ $$;
 
 create or replace function public.predict_close(m public.matches)
   returns timestamptz language sql immutable as $$
-  select m.kickoff - interval '2 hours';
+  select m.kickoff - interval '5 minutes';
 $$;
 
 -- ---------- 3. PREDICTIONS ------------------------------------
@@ -137,7 +137,7 @@ create policy "update prediction in window" on public.predictions
       where m.id = match_id
         and m.is_completed = false
         and now() >= (m.kickoff - interval '24 hours')
-        and now() <= (m.kickoff - interval '2 hours')
+        and now() <= (m.kickoff - interval '5 minutes')
     )
   );
 
