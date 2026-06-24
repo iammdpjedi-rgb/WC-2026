@@ -5,43 +5,30 @@ import { useAuth } from "./_app";
 import { useRouter } from "next/router";
 import { formatLocal, predictionStatus, pickLabel } from "../lib/helpers";
 
-// Big headline number (Points / Accuracy / Rank).
-function HeroStat({ label, value, accent }) {
+// A stat tile — same look as before, now tappable to filter the list below.
+function Stat({ label, value, accent, selected, onClick }) {
   return (
-    <div className="card p-4 text-center">
-      <div className={`text-3xl sm:text-4xl font-extrabold leading-none ${accent ? "text-gold" : ""}`}>
-        {value}
-      </div>
-      <div className="text-xs text-white/60 mt-2 uppercase tracking-wide">{label}</div>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className={`card p-4 text-center w-full transition hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40 ${selected ? "ring-2 ring-white/50 bg-white/5" : ""}`}
+    >
+      <div className={`text-2xl font-extrabold ${accent ? "text-gold" : ""}`}>{value}</div>
+      <div className="text-xs text-white/60 mt-1">{label}</div>
+    </button>
   );
 }
 
-// One label/value line inside the breakdown card.
-function SummaryRow({ label, value }) {
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
-      <span className="text-sm text-white/70">{label}</span>
-      <span className="text-sm font-semibold">{value}</span>
-    </div>
-  );
-}
-
-// Status pill shown on each prediction.
-function ResultBadge({ m, isCorrect }) {
-  const base = "whitespace-nowrap text-xs font-semibold px-2 py-1 rounded-full border";
-  if (m.is_completed) {
-    return isCorrect ? (
-      <span className={`${base} bg-green-400/10 text-green-300 border-green-400/30`}>Correct +2</span>
-    ) : (
-      <span className={`${base} bg-red-400/10 text-red-300 border-red-400/30`}>Wrong</span>
-    );
-  }
-  return predictionStatus(m) === "open" ? (
-    <span className={`${base} bg-blue-400/10 text-blue-300 border-blue-400/30`}>Editable</span>
-  ) : (
-    <span className={`${base} bg-white/5 text-white/50 border-white/10`}>Locked</span>
-  );
+// Which predictions a given tile should reveal.
+function matchesView(r, view) {
+  const m = r.match;
+  const isGraded = m.is_completed && m.result;
+  if (view === "all") return true;
+  if (view === "correct") return isGraded && r.is_correct;
+  if (view === "wrong") return isGraded && !r.is_correct;
+  if (view === "graded") return isGraded;
+  if (view === "pending") return !isGraded;
+  return true;
 }
 
 export default function Dashboard() {
@@ -50,6 +37,7 @@ export default function Dashboard() {
   const [rows, setRows] = useState([]);
   const [rank, setRank] = useState("—");
   const [ready, setReady] = useState(false);
+  const [active, setActive] = useState(null); // id of the tapped tile, or null for "show all"
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
@@ -84,61 +72,87 @@ export default function Dashboard() {
   const accuracy = graded.length ? Math.round((correct / graded.length) * 1000) / 10 : 0;
   const pending = rows.length - graded.length;
 
+  // Each tile: its number, and what tapping it opens.
+  const tiles = [
+    { id: "points",   label: "Points",           value: points,         accent: true,  view: "correct", heading: "Matches you won" },
+    { id: "accuracy", label: "Accuracy",         value: `${accuracy}%`, accent: true,  view: "graded",  heading: "Graded predictions" },
+    { id: "rank",     label: "Points Rank",      value: rank,           accent: false, view: "all",     heading: "All predictions" },
+    { id: "made",     label: "Predictions Made", value: rows.length,    accent: false, view: "all",     heading: "All predictions" },
+    { id: "correct",  label: "Correct Picks",    value: correct,        accent: false, view: "correct", heading: "Correct picks" },
+    { id: "wrong",    label: "Wrong Picks",      value: wrong,          accent: false, view: "wrong",   heading: "Wrong picks" },
+    { id: "graded",   label: "Graded",           value: graded.length,  accent: false, view: "graded",  heading: "Graded predictions" },
+    { id: "pending",  label: "Pending",          value: pending,        accent: false, view: "pending", heading: "Pending predictions" },
+  ];
+
+  const activeTile = tiles.find(t => t.id === active) || null;
+  const view = activeTile ? activeTile.view : "all";
+  const visible = rows.filter(r => matchesView(r, view));
+
   return (
     <Layout>
-      <h1 className="text-2xl sm:text-3xl font-extrabold mb-1">Hi, {profile?.display_name} 👋</h1>
-      <p className="text-white/60 text-sm mb-5">Your prediction summary</p>
+      <h1 className="text-2xl font-extrabold mb-1">Hi, {profile?.display_name} 👋</h1>
+      <p className="text-white/60 text-sm mb-5">Your prediction summary — tap any box to see those matches</p>
 
-      {/* Headline numbers — always 3 across, big and readable on a phone */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <HeroStat label="Points" value={points} accent />
-        <HeroStat label="Accuracy" value={`${accuracy}%`} accent />
-        <HeroStat label="Rank" value={rank} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        {tiles.map(t => (
+          <Stat
+            key={t.id}
+            label={t.label}
+            value={t.value}
+            accent={t.accent}
+            selected={active === t.id}
+            onClick={() => setActive(active === t.id ? null : t.id)}
+          />
+        ))}
       </div>
 
-      {/* The detail numbers, grouped into one tidy card instead of many tiny tiles */}
-      <div className="card px-4 py-2 mb-6">
-        <SummaryRow label="Predictions made" value={rows.length} />
-        <SummaryRow label="Correct picks" value={correct} />
-        <SummaryRow label="Wrong picks" value={wrong} />
-        <SummaryRow label="Graded" value={graded.length} />
-        <SummaryRow label="Pending" value={pending} />
-      </div>
+      {activeTile ? (
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-bold">
+            {activeTile.heading}{" "}
+            <span className="text-white/50 text-sm font-normal">({visible.length})</span>
+          </h2>
+          <button type="button" onClick={() => setActive(null)} className="text-sm text-gold">
+            Show all
+          </button>
+        </div>
+      ) : (
+        <h2 className="font-bold mb-3">Your predictions</h2>
+      )}
 
-      <h2 className="font-bold mb-3">Your predictions</h2>
       {!ready && <p className="text-white/50">Loading…</p>}
       {ready && rows.length === 0 && (
         <div className="card p-6 text-center text-white/60">
-          <p className="mb-3">You haven&apos;t made any predictions yet.</p>
-          <a
-            href="/matches"
-            className="inline-block text-sm font-semibold px-4 py-2 rounded-lg bg-white/10 text-gold border border-white/10"
-          >
-            Go to Matches →
-          </a>
+          You haven&apos;t made any predictions yet. Head to <b>Matches</b> to start.
+        </div>
+      )}
+      {ready && rows.length > 0 && visible.length === 0 && (
+        <div className="card p-6 text-center text-white/60">
+          No matches to show here yet.
         </div>
       )}
 
-      {/* Each prediction stacks top-to-bottom so long team names never get squashed */}
-      <div className="space-y-3">
-        {ready && rows.map((r, i) => {
+      <div className="space-y-2">
+        {ready && rows.length > 0 && visible.map((r, i) => {
           const m = r.match;
+          const status = predictionStatus(m);
           const tone = m.is_completed
             ? (r.is_correct ? "border-green-400/40" : "border-red-400/30")
             : "border-white/10";
           return (
-            <div key={i} className={`card p-3 border ${tone}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="text-xs text-white/50 min-w-0">
-                  {m.stage} · {formatLocal(m.kickoff)}
+            <div key={m.id || i} className={`card p-3 flex items-center justify-between border ${tone}`}>
+              <div>
+                <div className="font-semibold text-sm">{m.team_a} vs {m.team_b}</div>
+                <div className="text-xs text-white/50">{m.stage} · {formatLocal(m.kickoff)}</div>
+              </div>
+              <div className="text-right">
+                <div className="text-sm">Pick: <b>{pickLabel(m, r.pick)}</b></div>
+                <div className="text-xs">
+                  {m.is_completed
+                    ? (r.is_correct ? <span className="text-green-400">Correct +2</span>
+                                    : <span className="text-red-400">Wrong</span>)
+                    : <span className="text-white/50">{status === "open" ? "Editable" : "Locked"}</span>}
                 </div>
-                <ResultBadge m={m} isCorrect={r.is_correct} />
-              </div>
-              <div className="font-semibold text-base leading-snug mt-1">
-                {m.team_a} vs {m.team_b}
-              </div>
-              <div className="text-sm text-white/70 mt-1">
-                Your pick: <b className="text-white">{pickLabel(m, r.pick)}</b>
               </div>
             </div>
           );
