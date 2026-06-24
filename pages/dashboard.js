@@ -3,9 +3,9 @@ import Layout from "../components/Layout";
 import { supabase } from "../lib/supabaseClient";
 import { useAuth } from "./_app";
 import { useRouter } from "next/router";
-import { formatLocal, predictionStatus, pickLabel } from "../lib/helpers";
+import { formatLocal, predictionStatus, pickLabel, statusLabel } from "../lib/helpers";
 
-// A stat tile — same look as before, now tappable to filter the list below.
+// A stat tile — same look as before, tappable to filter the list below.
 function Stat({ label, value, accent, selected, onClick }) {
   return (
     <button
@@ -16,6 +16,16 @@ function Stat({ label, value, accent, selected, onClick }) {
       <div className={`text-2xl font-extrabold ${accent ? "text-gold" : ""}`}>{value}</div>
       <div className="text-xs text-white/60 mt-1">{label}</div>
     </button>
+  );
+}
+
+// One label/value line inside an expanded match.
+function Detail({ label, value }) {
+  return (
+    <div className="flex items-center justify-between py-1">
+      <span className="text-xs text-white/50">{label}</span>
+      <span className="text-xs font-medium text-right">{value}</span>
+    </div>
   );
 }
 
@@ -31,13 +41,24 @@ function matchesView(r, view) {
   return true;
 }
 
+// The match outcome. Shows a goal scoreline automatically IF score columns
+// (score_a / score_b) ever get added; otherwise falls back to the winner.
+function resultText(m) {
+  if (!m.result) return "—";
+  const hasScore = m.score_a != null && m.score_b != null;
+  if (m.result === "D") return hasScore ? `Draw ${m.score_a}–${m.score_b}` : "Draw";
+  const winner = m.result === "A" ? m.team_a : m.team_b;
+  return hasScore ? `${winner} won ${m.score_a}–${m.score_b}` : `${winner} won`;
+}
+
 export default function Dashboard() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
   const [rows, setRows] = useState([]);
   const [rank, setRank] = useState("—");
   const [ready, setReady] = useState(false);
-  const [active, setActive] = useState(null); // id of the tapped tile, or null for "show all"
+  const [active, setActive] = useState(null);       // tapped tile id, or null = show all
+  const [expandedId, setExpandedId] = useState(null); // match id currently expanded
 
   useEffect(() => {
     if (!loading && !user) router.replace("/login");
@@ -91,7 +112,7 @@ export default function Dashboard() {
   return (
     <Layout>
       <h1 className="text-2xl font-extrabold mb-1">Hi, {profile?.display_name} 👋</h1>
-      <p className="text-white/60 text-sm mb-5">Your prediction summary — tap any box to see those matches</p>
+      <p className="text-white/60 text-sm mb-5">Your prediction summary — tap any stat to filter, or a match for full details</p>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {tiles.map(t => (
@@ -101,7 +122,7 @@ export default function Dashboard() {
             value={t.value}
             accent={t.accent}
             selected={active === t.id}
-            onClick={() => setActive(active === t.id ? null : t.id)}
+            onClick={() => { setActive(active === t.id ? null : t.id); setExpandedId(null); }}
           />
         ))}
       </div>
@@ -136,24 +157,54 @@ export default function Dashboard() {
         {ready && rows.length > 0 && visible.map((r, i) => {
           const m = r.match;
           const status = predictionStatus(m);
+          const open = expandedId === m.id;
           const tone = m.is_completed
             ? (r.is_correct ? "border-green-400/40" : "border-red-400/30")
             : "border-white/10";
           return (
-            <div key={m.id || i} className={`card p-3 flex items-center justify-between border ${tone}`}>
-              <div>
-                <div className="font-semibold text-sm">{m.team_a} vs {m.team_b}</div>
-                <div className="text-xs text-white/50">{m.stage} · {formatLocal(m.kickoff)}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm">Pick: <b>{pickLabel(m, r.pick)}</b></div>
-                <div className="text-xs">
-                  {m.is_completed
-                    ? (r.is_correct ? <span className="text-green-400">Correct +2</span>
-                                    : <span className="text-red-400">Wrong</span>)
-                    : <span className="text-white/50">{status === "open" ? "Editable" : "Locked"}</span>}
+            <div key={m.id || i} className={`card border ${tone} overflow-hidden`}>
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => setExpandedId(open ? null : m.id)}
+                className="w-full text-left p-3 flex items-center justify-between gap-3 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+              >
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm">{m.team_a} vs {m.team_b}</div>
+                  <div className="text-xs text-white/50">{m.stage} · {formatLocal(m.kickoff)}</div>
                 </div>
-              </div>
+                <div className="flex items-center gap-2">
+                  <div className="text-right">
+                    <div className="text-sm">Pick: <b>{pickLabel(m, r.pick)}</b></div>
+                    <div className="text-xs">
+                      {m.is_completed ? (
+                        <span className="text-white/70">
+                          {resultText(m)}{" "}
+                          {r.is_correct
+                            ? <span className="text-green-400">· +2</span>
+                            : <span className="text-red-400">· 0</span>}
+                        </span>
+                      ) : (
+                        <span className="text-white/50">
+                          {status === "open" ? "Editable" : status === "upcoming" ? "Upcoming" : "Locked"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <span className="text-white/40 text-xs">{open ? "▾" : "▸"}</span>
+                </div>
+              </button>
+
+              {open && (
+                <div className="border-t border-white/10 px-3 py-2 bg-white/5">
+                  <Detail label="Stage" value={m.stage} />
+                  <Detail label="Kick-off" value={formatLocal(m.kickoff)} />
+                  <Detail label="Your pick" value={pickLabel(m, r.pick)} />
+                  <Detail label="Result" value={m.is_completed ? resultText(m) : "Not played yet"} />
+                  <Detail label="Points earned" value={m.is_completed ? (r.is_correct ? "2" : "0") : "—"} />
+                  <Detail label="Status" value={statusLabel(m)} />
+                </div>
+              )}
             </div>
           );
         })}
