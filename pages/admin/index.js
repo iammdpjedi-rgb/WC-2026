@@ -18,6 +18,7 @@ export default function Admin() {
   const [editId, setEditId] = useState(null);
   const [bulk, setBulk] = useState("");
   const [note, setNote] = useState("");
+  const [scores, setScores] = useState({}); // { [matchId]: { a, b } } for the score boxes
 
   useEffect(() => {
     if (!loading && (!user || !profile?.is_admin)) router.replace("/");
@@ -25,13 +26,31 @@ export default function Admin() {
 
   async function load() {
     const { data: ms } = await supabase.from("matches").select("*").order("kickoff");
-    setMatches(ms || []);
+    const list = ms || [];
+    setMatches(list);
+    // Seed the score boxes from whatever is already saved.
+    const sc = {};
+    list.forEach(m => { sc[m.id] = { a: m.score_a ?? "", b: m.score_b ?? "" }; });
+    setScores(sc);
     const { data: us } = await supabase.from("profiles").select("*").order("created_at");
     setUsers(us || []);
   }
   useEffect(() => { if (profile?.is_admin) load(); }, [profile]);
 
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  // ---- Score boxes (display only — does NOT affect points) ----
+  const toInt = (v) => (v === "" || v === null || isNaN(parseInt(v, 10)) ? null : parseInt(v, 10));
+  const setScoreField = (id, field) => (e) =>
+    setScores(s => ({ ...s, [id]: { ...(s[id] || { a: "", b: "" }), [field]: e.target.value } }));
+  async function saveScore(m) {
+    const s = scores[m.id] || { a: "", b: "" };
+    const { error } = await supabase.from("matches")
+      .update({ score_a: toInt(s.a), score_b: toInt(s.b) })
+      .eq("id", m.id);
+    setNote(error ? "Error: " + error.message : `Score saved for ${m.team_a} vs ${m.team_b}.`);
+    load();
+  }
 
   // ---- Fixtures ----
   async function saveFixture(e) {
@@ -171,7 +190,9 @@ export default function Admin() {
                 <div>
                   <div className="font-semibold text-sm">{m.team_a} vs {m.team_b}</div>
                   <div className="text-xs text-white/50">{m.stage} · {formatLocal(m.kickoff)}
-                    {m.is_completed && <span className="text-gold"> · Result: {m.result}</span>}</div>
+                    {m.is_completed && (
+                      <span className="text-gold"> · {m.result === "D" ? "Draw" : (m.result === "A" ? m.team_a : m.team_b) + " won"}{m.score_a != null && m.score_b != null ? ` ${m.score_a}–${m.score_b}` : ""}</span>
+                    )}</div>
                 </div>
                 {m.is_completed && <button onClick={() => reopen(m)} className="btn-ghost text-xs">Reopen</button>}
               </div>
@@ -180,6 +201,21 @@ export default function Admin() {
                 {m.stage === "Group Stage" &&
                   <button onClick={() => setResult(m, "D")} className={`btn text-xs flex-1 ${m.result==="D"?"bg-gold text-ink":"bg-white/10"}`}>Draw</button>}
                 <button onClick={() => setResult(m, "B")} className={`btn text-xs flex-1 ${m.result==="B"?"bg-gold text-ink":"bg-white/10"}`}>{m.team_b} won</button>
+              </div>
+
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
+                <span className="text-xs text-white/50">Score</span>
+                <div className="w-14">
+                  <input type="number" min="0" inputMode="numeric" className="input text-center"
+                    placeholder={m.team_a_code || "A"} value={scores[m.id]?.a ?? ""} onChange={setScoreField(m.id, "a")} />
+                </div>
+                <span className="text-white/40">–</span>
+                <div className="w-14">
+                  <input type="number" min="0" inputMode="numeric" className="input text-center"
+                    placeholder={m.team_b_code || "B"} value={scores[m.id]?.b ?? ""} onChange={setScoreField(m.id, "b")} />
+                </div>
+                <button onClick={() => saveScore(m)} className="btn-ghost text-xs">Save score</button>
+                <span className="text-xs text-white/40">optional · display only</span>
               </div>
             </div>
           ))}
