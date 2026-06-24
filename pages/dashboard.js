@@ -5,12 +5,42 @@ import { useAuth } from "./_app";
 import { useRouter } from "next/router";
 import { formatLocal, predictionStatus, pickLabel } from "../lib/helpers";
 
-function Stat({ label, value, accent }) {
+// Big headline number (Points / Accuracy / Rank).
+function HeroStat({ label, value, accent }) {
   return (
     <div className="card p-4 text-center">
-      <div className={`text-2xl font-extrabold ${accent ? "text-gold" : ""}`}>{value}</div>
-      <div className="text-xs text-white/60 mt-1">{label}</div>
+      <div className={`text-3xl sm:text-4xl font-extrabold leading-none ${accent ? "text-gold" : ""}`}>
+        {value}
+      </div>
+      <div className="text-xs text-white/60 mt-2 uppercase tracking-wide">{label}</div>
     </div>
+  );
+}
+
+// One label/value line inside the breakdown card.
+function SummaryRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+      <span className="text-sm text-white/70">{label}</span>
+      <span className="text-sm font-semibold">{value}</span>
+    </div>
+  );
+}
+
+// Status pill shown on each prediction.
+function ResultBadge({ m, isCorrect }) {
+  const base = "whitespace-nowrap text-xs font-semibold px-2 py-1 rounded-full border";
+  if (m.is_completed) {
+    return isCorrect ? (
+      <span className={`${base} bg-green-400/10 text-green-300 border-green-400/30`}>Correct +2</span>
+    ) : (
+      <span className={`${base} bg-red-400/10 text-red-300 border-red-400/30`}>Wrong</span>
+    );
+  }
+  return predictionStatus(m) === "open" ? (
+    <span className={`${base} bg-blue-400/10 text-blue-300 border-blue-400/30`}>Editable</span>
+  ) : (
+    <span className={`${base} bg-white/5 text-white/50 border-white/10`}>Locked</span>
   );
 }
 
@@ -52,51 +82,63 @@ export default function Dashboard() {
   const wrong = graded.length - correct;
   const points = correct * 2;
   const accuracy = graded.length ? Math.round((correct / graded.length) * 1000) / 10 : 0;
+  const pending = rows.length - graded.length;
 
   return (
     <Layout>
-      <h1 className="text-2xl font-extrabold mb-1">Hi, {profile?.display_name} 👋</h1>
+      <h1 className="text-2xl sm:text-3xl font-extrabold mb-1">Hi, {profile?.display_name} 👋</h1>
       <p className="text-white/60 text-sm mb-5">Your prediction summary</p>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-        <Stat label="Points" value={points} accent />
-        <Stat label="Accuracy" value={`${accuracy}%`} accent />
-        <Stat label="Points Rank" value={rank} />
-        <Stat label="Predictions Made" value={rows.length} />
-        <Stat label="Correct Picks" value={correct} />
-        <Stat label="Wrong Picks" value={wrong} />
-        <Stat label="Graded" value={graded.length} />
-        <Stat label="Pending" value={rows.length - graded.length} />
+      {/* Headline numbers — always 3 across, big and readable on a phone */}
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <HeroStat label="Points" value={points} accent />
+        <HeroStat label="Accuracy" value={`${accuracy}%`} accent />
+        <HeroStat label="Rank" value={rank} />
+      </div>
+
+      {/* The detail numbers, grouped into one tidy card instead of many tiny tiles */}
+      <div className="card px-4 py-2 mb-6">
+        <SummaryRow label="Predictions made" value={rows.length} />
+        <SummaryRow label="Correct picks" value={correct} />
+        <SummaryRow label="Wrong picks" value={wrong} />
+        <SummaryRow label="Graded" value={graded.length} />
+        <SummaryRow label="Pending" value={pending} />
       </div>
 
       <h2 className="font-bold mb-3">Your predictions</h2>
       {!ready && <p className="text-white/50">Loading…</p>}
       {ready && rows.length === 0 && (
         <div className="card p-6 text-center text-white/60">
-          You haven&apos;t made any predictions yet. Head to <b>Matches</b> to start.
+          <p className="mb-3">You haven&apos;t made any predictions yet.</p>
+          <a
+            href="/matches"
+            className="inline-block text-sm font-semibold px-4 py-2 rounded-lg bg-white/10 text-gold border border-white/10"
+          >
+            Go to Matches →
+          </a>
         </div>
       )}
-      <div className="space-y-2">
-        {rows.map((r, i) => {
+
+      {/* Each prediction stacks top-to-bottom so long team names never get squashed */}
+      <div className="space-y-3">
+        {ready && rows.map((r, i) => {
           const m = r.match;
-          const status = predictionStatus(m);
           const tone = m.is_completed
             ? (r.is_correct ? "border-green-400/40" : "border-red-400/30")
             : "border-white/10";
           return (
-            <div key={i} className={`card p-3 flex items-center justify-between border ${tone}`}>
-              <div>
-                <div className="font-semibold text-sm">{m.team_a} vs {m.team_b}</div>
-                <div className="text-xs text-white/50">{m.stage} · {formatLocal(m.kickoff)}</div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm">Pick: <b>{pickLabel(m, r.pick)}</b></div>
-                <div className="text-xs">
-                  {m.is_completed
-                    ? (r.is_correct ? <span className="text-green-400">Correct +2</span>
-                                    : <span className="text-red-400">Wrong</span>)
-                    : <span className="text-white/50">{status === "open" ? "Editable" : "Locked"}</span>}
+            <div key={i} className={`card p-3 border ${tone}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="text-xs text-white/50 min-w-0">
+                  {m.stage} · {formatLocal(m.kickoff)}
                 </div>
+                <ResultBadge m={m} isCorrect={r.is_correct} />
+              </div>
+              <div className="font-semibold text-base leading-snug mt-1">
+                {m.team_a} vs {m.team_b}
+              </div>
+              <div className="text-sm text-white/70 mt-1">
+                Your pick: <b className="text-white">{pickLabel(m, r.pick)}</b>
               </div>
             </div>
           );
