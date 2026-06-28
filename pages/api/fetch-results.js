@@ -1,25 +1,25 @@
 // =============================================================
 // pages/api/fetch-results.js
 //
-// Pulls FINISHED World Cup matches from a football data feed and
+// Reads FINISHED World Cup matches from the worldcup26.ir API and
 // writes the winners into your `matches` table, then runs your
 // existing scoring engine. Nothing about scoring/RLS/leaderboards
 // changes — this just does the same two writes your admin "tap the
 // winner" button does, automatically.
 //
-// It can be triggered two ways:
+// Triggered two ways:
 //   1) The "Fetch results" button in Admin (sends the admin's login token).
 //   2) (Optional, later) a free scheduler sending the x-sync-secret header
-//      — that's Option B / fully hands-off. No code change needed for it.
+//      — that's the fully hands-off version. No code change needed for it.
 //
-// ENV VARS to set in Vercel (Settings -> Environment Variables).
-// IMPORTANT: do NOT prefix these with NEXT_PUBLIC_ — they must stay
-// server-side only.
-//   SUPABASE_SERVICE_ROLE_KEY   -> Supabase service_role key (Project
-//                                  Settings -> API -> service_role "secret").
-//   FOOTBALL_API_KEY            -> your football-data.org token.
-//   RESULTS_SYNC_SECRET         -> any random string; ONLY needed when you
-//                                  add the scheduler (Option B).
+// ENV VARS in Vercel (Settings -> Environment Variables).
+// Do NOT prefix these with NEXT_PUBLIC_ — they must stay server-side.
+//   SUPABASE_SERVICE_ROLE_KEY  -> Supabase service_role key (Settings ->
+//                                 API Keys -> Legacy API Keys tab).
+//   WC_API_EMAIL               -> your worldcup26.ir login email   (already set)
+//   WC_API_PASSWORD            -> your worldcup26.ir login password (already set)
+//   RESULTS_SYNC_SECRET        -> any random string; ONLY needed when you
+//                                 add the scheduler.
 // The existing NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY
 // are reused automatically.
 //
@@ -31,12 +31,15 @@ import { createClient } from "@supabase/supabase-js";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const FOOTBALL_API_KEY = process.env.FOOTBALL_API_KEY;
 const SYNC_SECRET = process.env.RESULTS_SYNC_SECRET;
 
-// ---- Name matching helpers ----------------------------------
+// ---- worldcup26.ir API ----
+const WC_BASE = "https://worldcup26.ir";
+const WC_EMAIL = process.env.WC_API_EMAIL;
+const WC_PASSWORD = process.env.WC_API_PASSWORD;
+
+// ---- Name matching helpers ----
 // Normalise a team name: lowercase, drop accents and punctuation.
-// "Côte d'Ivoire" -> "cote d ivoire", "USA" -> "usa", etc.
 function norm(s) {
   return (s || "")
     .normalize("NFD")
@@ -46,11 +49,10 @@ function norm(s) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
-
 // Known naming differences between your fixtures and the feed.
-// Every variant on the left collapses to one shared key, so it does
-// not matter which spelling each side uses — they still match.
-// If a match comes back "couldn't match", add the two spellings here.
+// Every variant on the left collapses to one shared key, so it does not
+// matter which spelling each side uses. If a match comes back "couldn't
+// match", add the two spellings here.
 const ALIASES = {
   "usa": "united states",
   "united states of america": "united states",
@@ -61,58 +63,102 @@ const ALIASES = {
   "czechia": "czech republic",
   "cape verde": "cabo verde",
   "iran": "ir iran",
-  "drc": "congo dr",
-  "dr congo": "congo dr",
 };
 function canon(name) {
   const n = norm(name);
   return ALIASES[n] || n;
 }
 
-function dayUTC(iso) {
-  return new Date(iso).toISOString().slice(0, 10); // YYYY-MM-DD in UTC
-}
-function daysApart(d1, d2) {
-  const a = new Date(d1 + "T00:00:00Z").getTime();
-  const b = new Date(d2 + "T00:00:00Z").getTime();
-  return Math.round(Math.abs(a - b) / 86400000);
+// Pull an array out of whatever shape the API returns.
+function pickArray(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object") {
+    for (const k of ["data", "games", "matches", "teams", "results", "items"]) {
+      if (Array.isArray(payload[k])) return payload[k];
+    }
+    for (const v of Object.values(payload)) if (Array.isArray(v)) return v;
+    const objs = Object.values(payload).filter((v) => v && typeof v === "object");
+    if (objs.length) return objs;
+  }
+  return [];
 }
 
-// ---- Provider adapter: football-data.org --------------------
-// Returns a normalised list of FINISHED matches. To use a DIFFERENT
-// provider (or a feed you already have), replace ONLY this function
-// with one that returns the same shape. Nothing else needs to change.
-async function fetchFinishedMatches() {
-  // Competition "WC" = FIFA World Cup. (Numeric id 2000 also works if
-  // you ever get a 404 on the code.)
-  const res = await fetch(
-    "https://api.football-data.org/v4/competitions/WC/matches",
-    { headers: { "X-Auth-Token": FOOTBALL_API_KEY } }
-  );
+// Loose check used only to break ties when the same pair appears twice.
+function typeMatchesStage(typeRaw, stage) {
+  const t = canon(typeRaw);
+  const s = canon(stage);
+  if (!t) return false;
+  if (s.includes("group")) return t.includes("group");
+  if (s.includes("32")) return t.includes("32");
+  if (s.includes("16")) return t.includes("16");
+  if (s.includes("quarter")) return t.includes("quarter") || t === "qf";
+  if (s.includes("semi")) return t.includes("semi") || t === "sf";
+  if (s.includes("third")) return t.includes("third") || t.includes("3rd");
+  if (s.includes("final")) return t.includes("final");
+  return false;
+}
+
+// ---- Log in, then read teams + games ----
+async function wcLogin() {
+  const res = await fetch(`${WC_BASE}/auth/authenticate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: WC_EMAIL, password: WC_PASSWORD }),
+  });
   if (!res.ok) {
     throw new Error(
-      `Football data feed returned ${res.status}. Check FOOTBALL_API_KEY / your free-tier access.`
+      `worldcup26.ir login returned ${res.status} — check WC_API_EMAIL / WC_API_PASSWORD.`
     );
   }
   const data = await res.json();
-  const matches = Array.isArray(data.matches) ? data.matches : [];
-  return matches
-    .filter((m) => m.status === "FINISHED")
-    .map((m) => {
-      let winner = null; // "HOME" | "AWAY" | "DRAW"
-      if (m.score?.winner === "HOME_TEAM") winner = "HOME";
-      else if (m.score?.winner === "AWAY_TEAM") winner = "AWAY";
-      else if (m.score?.winner === "DRAW") winner = "DRAW";
-      return {
-        externalId: String(m.id),
-        day: dayUTC(m.utcDate),
-        homeName: m.homeTeam?.name || m.homeTeam?.shortName || "",
-        awayName: m.awayTeam?.name || m.awayTeam?.shortName || "",
-        homeGoals: m.score?.fullTime?.home ?? null,
-        awayGoals: m.score?.fullTime?.away ?? null,
-        winner,
-      };
-    });
+  if (!data?.token) throw new Error("worldcup26.ir login did not return a token.");
+  return data.token;
+}
+
+async function wcGet(path, token) {
+  const res = await fetch(`${WC_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`worldcup26.ir ${path} returned ${res.status}.`);
+  return res.json();
+}
+
+// Returns a normalised list of FINISHED matches. (This is the only part
+// that is specific to worldcup26.ir — to switch feeds, replace just this.)
+async function fetchFinishedMatches() {
+  const token = await wcLogin();
+  const teams = pickArray(await wcGet("/get/teams", token));
+  const games = pickArray(await wcGet("/get/games", token));
+
+  // team id -> English name, so we can match against your fixtures.
+  const nameById = {};
+  for (const t of teams) {
+    if (t && t.id != null) {
+      nameById[String(t.id)] = t.name_en || t.name || t.fifa_code || "";
+    }
+  }
+
+  const isFinished = (v) => v === true || v === "true" || v === 1 || v === "1";
+
+  return games.filter((g) => isFinished(g.finished)).map((g) => {
+    const hg = Number(g.home_score);
+    const ag = Number(g.away_score);
+    let winner = null; // "HOME" | "AWAY" | "DRAW"
+    if (Number.isFinite(hg) && Number.isFinite(ag)) {
+      if (hg > ag) winner = "HOME";
+      else if (ag > hg) winner = "AWAY";
+      else winner = "DRAW";
+    }
+    return {
+      externalId: String(g.id),
+      homeName: nameById[String(g.home_team_id)] || "",
+      awayName: nameById[String(g.away_team_id)] || "",
+      homeGoals: Number.isFinite(hg) ? hg : null,
+      awayGoals: Number.isFinite(ag) ? ag : null,
+      winner,
+      typeRaw: g.type || "",
+    };
+  });
 }
 
 export default async function handler(req, res) {
@@ -120,10 +166,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
   if (!SUPABASE_URL || !SERVICE_KEY) {
-    return res.status(500).json({ error: "Server is missing Supabase config." });
+    return res.status(500).json({ error: "Server is missing Supabase config (SUPABASE_SERVICE_ROLE_KEY)." });
   }
-  if (!FOOTBALL_API_KEY) {
-    return res.status(500).json({ error: "Server is missing FOOTBALL_API_KEY." });
+  if (!WC_EMAIL || !WC_PASSWORD) {
+    return res.status(500).json({ error: "Server is missing WC_API_EMAIL / WC_API_PASSWORD." });
   }
 
   // ---- Authorise: admin login token (button) OR sync secret (scheduler) ----
@@ -183,45 +229,46 @@ export default async function handler(req, res) {
   for (const m of pending || []) {
     const label = `${m.team_a} vs ${m.team_b}`;
 
-    // Find the feed fixture: prefer a stored id, else match by name + date.
+    // Find the feed game: prefer a stored id, else match on the team pair.
     let f = null;
     if (m.external_id) {
       f = feed.find((x) => x.externalId === String(m.external_id)) || null;
     }
     if (!f) {
-      const day = dayUTC(m.kickoff);
       const a = canon(m.team_a);
       const b = canon(m.team_b);
-      const candidates = feed.filter((x) => {
+      let candidates = feed.filter((x) => {
         const h = canon(x.homeName);
         const aw = canon(x.awayName);
-        const samePair = (h === a && aw === b) || (h === b && aw === a);
-        return samePair && daysApart(day, x.day) <= 1; // allow midnight-UTC straddle
+        return (h === a && aw === b) || (h === b && aw === a);
       });
+      if (candidates.length > 1) {
+        const narrowed = candidates.filter((x) => typeMatchesStage(x.typeRaw, m.stage));
+        if (narrowed.length === 1) candidates = narrowed;
+      }
       if (candidates.length === 1) f = candidates[0];
     }
 
     if (!f) {
-      // Only worth flagging if it already kicked off; future games just
-      // aren't finished yet, so we stay quiet about those.
+      // Future games simply aren't finished yet — only flag past ones.
       if (new Date(m.kickoff).getTime() < now) unmatched.push(label);
       continue;
     }
 
-    // Work out orientation, then the A / B / D result.
+    // Orientation, then the A / B / D result.
     const homeIsA = canon(f.homeName) === canon(m.team_a);
     let result = null;
     if (f.winner === "DRAW") result = "D";
     else if (f.winner === "HOME") result = homeIsA ? "A" : "B";
     else if (f.winner === "AWAY") result = homeIsA ? "B" : "A";
 
-    // A knockout can never be a draw in this game. If the feed reports a
-    // level result (penalty shootout not reflected), don't guess — flag it.
+    // A knockout can't be a draw in this game. If the feed shows a level
+    // score (a penalty shootout it can't represent), don't guess — flag it.
     if (result === "D" && m.stage !== "Group Stage") {
       if (!m.external_id) {
         await admin.from("matches").update({ external_id: f.externalId }).eq("id", m.id);
       }
-      skipped.push(`${label} (decided on penalties — set this one by hand)`);
+      skipped.push(`${label} (level score — set this knockout by hand)`);
       continue;
     }
     if (!result) {
