@@ -28,6 +28,14 @@ const IconTrophy = () => (
     <path d="M9 20a3 3 0 0 1 6 0z" />
   </svg>
 );
+const IconPodium = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+    <path d="M12 2.6l1.2 2.4 2.6.4-1.9 1.8.5 2.6L12 9l-2.4 1.2.5-2.6L8.2 5.4l2.6-.4z" />
+    <rect x="9.5" y="12" width="5" height="9" rx="1" />
+    <rect x="3.5" y="15" width="5" height="6" rx="1" />
+    <rect x="15.5" y="14" width="5" height="7" rx="1" />
+  </svg>
+);
 const IconGrid = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
     <rect x="4" y="4" width="7" height="7" rx="1.5" />
@@ -103,6 +111,7 @@ export default function Layout({ children }) {
           <div className="max-w-5xl mx-auto px-1 flex items-stretch">
             <TabLink href="/matches" label="Matches" icon={<IconBall />} />
             <TabLink href="/" label="Leaders" icon={<IconChart />} />
+            <TabLink href="/podium" label="Podium" icon={<IconPodium />} />
             <TabLink href="/hall-of-fame" label="Fame" icon={<IconTrophy />} />
             {user && <TabLink href="/dashboard" label="Dashboard" icon={<IconGrid />} />}
             {profile?.is_admin && <TabLink href="/admin" label="Admin" icon={<IconGear />} />}
