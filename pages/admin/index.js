@@ -18,6 +18,7 @@ export default function Admin() {
   const [editId, setEditId] = useState(null);
   const [bulk, setBulk] = useState("");
   const [note, setNote] = useState("");
+  const [fetching, setFetching] = useState(false);
   const [scores, setScores] = useState({}); // { [matchId]: { a, b } } for the score boxes
 
   useEffect(() => {
@@ -50,6 +51,35 @@ export default function Admin() {
       .eq("id", m.id);
     setNote(error ? "Error: " + error.message : `Score saved for ${m.team_a} vs ${m.team_b}.`);
     load();
+  }
+
+  // ---- Auto-fetch results from the live data feed ----
+  // Calls /api/fetch-results, which fills winners + scores for finished
+  // matches and recalculates everyone's points. You can still Reopen any
+  // match below to override.
+  async function fetchResults() {
+    if (fetching) return;
+    setFetching(true);
+    setNote("Fetching results from the live feed…");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setNote("Please log in again."); setFetching(false); return; }
+      const res = await fetch("/api/fetch-results", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      const out = await res.json();
+      if (!res.ok) { setNote("Error: " + (out.error || res.status)); setFetching(false); return; }
+      const bits = [`Updated ${out.updatedCount} result${out.updatedCount === 1 ? "" : "s"}.`];
+      if (out.skipped?.length)   bits.push(`Set by hand: ${out.skipped.join("; ")}.`);
+      if (out.unmatched?.length) bits.push(`Couldn't match (check team names): ${out.unmatched.join("; ")}.`);
+      setNote(bits.join(" "));
+      load();
+    } catch (e) {
+      setNote("Error: " + (e.message || e));
+    } finally {
+      setFetching(false);
+    }
   }
 
   // ---- Fixtures ----
@@ -137,7 +167,12 @@ export default function Admin() {
     <Layout>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h1 className="text-2xl font-extrabold">Admin Panel</h1>
-        <button onClick={recalcAll} className="btn-ghost text-sm">↻ Recalculate all scores</button>
+        <div className="flex gap-2">
+          <button onClick={fetchResults} disabled={fetching} className="btn-primary text-sm disabled:opacity-50">
+            {fetching ? "Fetching…" : "⤓ Fetch results"}
+          </button>
+          <button onClick={recalcAll} className="btn-ghost text-sm">↻ Recalculate all scores</button>
+        </div>
       </div>
       {note && <p className="text-gold text-sm mb-3">{note}</p>}
 
