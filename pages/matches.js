@@ -104,6 +104,30 @@ export default function Matches() {
     return () => { active = false; if (t) clearInterval(t); };
   }, [tab]);
 
+  // Jump to a specific match when arriving from the Podium bracket
+  // (a link like /matches#match-123). Selects the right tab, then scrolls
+  // to the match and briefly highlights it.
+  useEffect(() => {
+    if (loading) return;
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    const mm = hash.match(/^#match-(\d+)$/);
+    if (!mm) return;
+    const id = Number(mm[1]);
+    const target = matches.find((x) => x.id === id);
+    if (!target) return;
+    setTab(tabOf(target, Date.now()));
+    setFilter("all");
+    setTimeout(() => {
+      const el = document.getElementById(`match-${id}`);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.style.boxShadow = "0 0 0 2px #e4bf5e";
+      el.style.borderRadius = "16px";
+      setTimeout(() => { el.style.boxShadow = ""; el.style.borderRadius = ""; }, 2600);
+    }, 250);
+    // eslint-disable-next-line
+  }, [loading, matches]);
+
   const stages = ["all", "Group Stage", "Round of 32", "Round of 16", "Quarter Final", "Semi Final", "Third Place", "Final"];
 
   // Sort every match into its tab.
@@ -172,7 +196,7 @@ export default function Matches() {
           const sc = (tab === "live" || tab === "completed") ? scoreFor(m) : null;
           const isFinal = tab === "completed" || (sc && sc.finished);
           return (
-            <div key={m.id}>
+            <div key={m.id} id={`match-${m.id}`}>
               {sc && (
                 <div className="mb-1 flex items-center justify-center gap-3 rounded-lg bg-white/5 px-3 py-1.5 text-sm">
                   <span>{m.team_a} <b className="text-gold">{sc.aScore}</b></span>
